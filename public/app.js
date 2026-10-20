@@ -56,7 +56,13 @@ function renderView() {
     const member = state.room.members.find((item) => item.id === state.member.id) || state.member;
     root.innerHTML = `<div class="welcome"><div class="eyebrow">character sheet</div><h1>${escapeHtml(member.name)}</h1><p>1학년 견습 마법사 · 아직 이름 붙지 않은 모험의 시작</p><div class="character-card"><div class="stat-head"><strong>생명력</strong><b>${member.hp || 20} / ${member.maxHp || 20}</b></div><div class="bar"><i style="width:${((member.hp || 20) / (member.maxHp || 20)) * 100}%"></i></div>${Object.entries(member.stats || { courage: 2, wit: 2, focus: 2 }).map(([key, value]) => `<div class="stat-row"><span>${({ courage: "용기", wit: "지혜", focus: "집중" })[key]}</span><strong>${value}</strong></div>`).join("")}<div class="xp">경험치 <strong>${member.xp || 0} / 100</strong></div></div></div>`;
   }
-  document.querySelectorAll("[data-location]").forEach((button) => button.onclick = () => gameAction("location", { location: button.dataset.location }));
+  document.querySelectorAll("[data-location]").forEach((button) => button.onclick = () => {
+    if (button.dataset.location === "grounds") {
+      gameAction("start-combat");
+    } else {
+      gameAction("location", { location: button.dataset.location });
+    }
+  });
   document.querySelector("#start-combat")?.addEventListener("click", () => gameAction("start-combat"));
   document.querySelectorAll("[data-spell]").forEach((button) => button.onclick = () => gameAction("combat", { spell: button.dataset.spell }));
 }
