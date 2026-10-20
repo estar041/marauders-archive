@@ -404,7 +404,10 @@ const server = http.createServer(async (req, res) => {
     const filePath = path.normalize(path.join(publicDir, file));
     if (!filePath.startsWith(publicDir) || !fs.existsSync(filePath)) return json(res, 404, { error: "Not found" });
     const types = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".svg": "image/svg+xml" };
-    res.writeHead(200, { "Content-Type": `${types[path.extname(filePath)] || "text/plain"}; charset=utf-8` });
+    res.writeHead(200, {
+      "Content-Type": `${types[path.extname(filePath)] || "text/plain"}; charset=utf-8`,
+      "Cache-Control": "no-cache, must-revalidate",
+    });
     fs.createReadStream(filePath).pipe(res);
   } catch (error) {
     json(res, 400, { error: error.message });
