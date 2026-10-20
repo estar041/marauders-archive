@@ -1,91 +1,73 @@
-const state = { room: null, member: null, stream: null, operatorToken: sessionStorage.getItem("operatorToken") };
+const state = { room: null, member: null, stream: null, operatorToken: sessionStorage.getItem("operatorToken"), view: "lobby" };
 const app = document.querySelector("#app");
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[char]));
 }
-
+function api(path, options = {}) {
+  return fetch(path, { headers: { "Content-Type": "application/json", ...(options.headers || {}) }, ...options }).then(async (response) => {
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "요청을 처리하지 못했습니다.");
+    return data;
+  });
+}
 function landing(error = "") {
-  app.innerHTML = `<div class="shell"><div class="hero"><div class="eyebrow">private text roleplaying game · 001</div><h1>마법학교의 기록실</h1><p>운영자가 공유한 링크와 입장 코드로 들어와, 한 학기씩 성장하며 캐릭터의 이야기를 함께 남깁니다.</p><div class="card"><h2>기록실 입장</h2><p class="hint">운영자에게 받은 초대 코드를 입력해 주세요.</p><div class="join"><input class="input" id="room-code" placeholder="초대 코드"><button class="primary" id="join">입장하기</button></div><p class="hint error">${escapeHtml(error)}</p></div><button class="text-button" id="operator">운영자 로그인</button></div></div>`;
+  app.innerHTML = `<div class="shell"><div class="hero"><div class="eyebrow">private text roleplaying game · 001</div><h1>마법학교의 기록실</h1><p>연회장에서 소문을 듣고, 수업에서 주문을 익히고, 성 바깥의 적과 맞서는 작은 온라인 RPG.</p><div class="card"><h2>기록실 입장</h2><p class="hint">운영자에게 받은 초대 코드를 입력해 주세요.</p><div class="join"><input class="input" id="room-code" placeholder="초대 코드"><button class="primary" id="join">입장하기</button></div><p class="hint error">${escapeHtml(error)}</p></div><button class="text-button" id="operator">운영자 로그인</button></div></div>`;
   document.querySelector("#join").onclick = async () => {
-    const roomCode = document.querySelector("#room-code").value.trim().toUpperCase();
-    const response = await fetch(`/api/rooms/${roomCode}`);
-    if (!response.ok) return landing("코드를 확인해 주세요.");
-    state.room = await response.json();
-    identify(false);
+    try { state.room = await api(`/api/rooms/${document.querySelector("#room-code").value.trim().toUpperCase()}`); identify(); } catch (err) { landing(err.message); }
   };
   document.querySelector("#operator").onclick = operatorLogin;
 }
-
-function operatorLogin(error = "") {
-  app.innerHTML = `<div class="shell"><div class="hero"><div class="eyebrow">operator access</div><h1>운영자 전용<br>기록 관리</h1><p>운영 코드가 있어야 기록실을 만들고 진행을 관리할 수 있습니다.</p><div class="card create"><input class="input" id="operator-code" type="password" placeholder="운영 코드"><button class="primary" id="operator-enter">확인</button></div><p class="hint error">${escapeHtml(error)}</p></div></div>`;
-  document.querySelector("#operator-enter").onclick = async () => {
-    const response = await fetch("/api/operator/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: document.querySelector("#operator-code").value }) });
-    const result = await response.json();
-    if (!response.ok) return operatorLogin(result.error);
-    state.operatorToken = result.token;
-    sessionStorage.setItem("operatorToken", result.token);
-    operatorPanel();
-  };
-}
-
-async function operatorPanel() {
-  const response = await fetch("/api/admin/rooms", { headers: { Authorization: `Bearer ${state.operatorToken}` } });
-  if (!response.ok) return operatorLogin("운영자 세션이 만료되었습니다.");
-  const rooms = await response.json();
-  app.innerHTML = `<div class="shell"><div class="hero"><div class="eyebrow">operator dashboard</div><h1>기록실 관리</h1><p>참가자에게는 생성 권한이 없고, 이 화면에서만 기록실을 열 수 있습니다.</p><div class="card"><h2>새 기록실 열기</h2><div class="create"><input class="input" id="room-name" value="별관의 첫 번째 학기" maxlength="40"><button class="primary" id="create">열기</button></div><div class="room-list">${rooms.length ? rooms.map((room) => `<div class="room-row"><span>${escapeHtml(room.name)}</span><strong>${room.code}</strong></div>`).join("") : "<p class='hint'>아직 열린 기록실이 없습니다.</p>"}</div></div><button class="text-button" id="logout">운영자 로그아웃</button></div></div>`;
-  document.querySelector("#create").onclick = async () => {
-    const result = await fetch("/api/rooms", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.operatorToken}` }, body: JSON.stringify({ name: document.querySelector("#room-name").value }) });
-    if (!result.ok) return operatorPanel();
-    const room = await result.json();
-    await navigator.clipboard?.writeText(room.code);
-    operatorPanel();
-  };
-  document.querySelector("#logout").onclick = () => { sessionStorage.removeItem("operatorToken"); state.operatorToken = null; landing(); };
-}
-
 function identify() {
-  app.innerHTML = `<div class="shell"><div class="hero"><div class="eyebrow">enter the archive</div><h1>당신의 이름을<br>기록해 주세요.</h1><p>실제 이름 대신 이 기록실에서 사용할 플레이어 이름을 입력합니다.</p><div class="card create"><input class="input" id="name" placeholder="예: 은빛 잉크"><button class="primary" id="enter">입장</button></div></div></div>`;
+  app.innerHTML = `<div class="shell"><div class="hero"><div class="eyebrow">enter the archive</div><h1>플레이어 이름을<br>기록해 주세요.</h1><p>이름은 게임 안에서 사용할 호칭입니다.</p><div class="card create"><input class="input" id="name" placeholder="예: 은빛 잉크"><button class="primary" id="enter">입장</button></div></div></div>`;
   document.querySelector("#enter").onclick = async () => {
-    const name = document.querySelector("#name").value.trim() || "익명의 마법사";
-    const response = await fetch(`/api/rooms/${state.room.code}/members`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
-    state.member = await response.json();
-    render();
-    connect();
+    try { state.member = await api(`/api/rooms/${state.room.code}/members`, { method: "POST", body: JSON.stringify({ name: document.querySelector("#name").value.trim() || "익명의 마법사" }) }); render(); connect(); } catch (err) { identify(); }
   };
 }
-
+function operatorLogin(error = "") {
+  app.innerHTML = `<div class="shell"><div class="hero"><div class="eyebrow">operator access</div><h1>운영자 전용<br>기록 관리</h1><div class="card create"><input class="input" id="operator-code" type="password" placeholder="운영 코드"><button class="primary" id="operator-enter">확인</button></div><p class="hint error">${escapeHtml(error)}</p></div></div>`;
+  document.querySelector("#operator-enter").onclick = async () => {
+    try { const result = await api("/api/operator/login", { method: "POST", body: JSON.stringify({ code: document.querySelector("#operator-code").value }) }); state.operatorToken = result.token; sessionStorage.setItem("operatorToken", result.token); operatorPanel(); } catch (err) { operatorLogin(err.message); }
+  };
+}
+async function operatorPanel() {
+  try {
+    const rooms = await api("/api/admin/rooms", { headers: { Authorization: `Bearer ${state.operatorToken}` } });
+    app.innerHTML = `<div class="shell"><div class="hero"><div class="eyebrow">operator dashboard</div><h1>기록실 관리</h1><div class="card"><h2>새 기록실 열기</h2><div class="create"><input class="input" id="room-name" value="별관의 첫 번째 학기" maxlength="40"><button class="primary" id="create">열기</button></div><div class="room-list">${rooms.map((room) => `<div class="room-row"><span>${escapeHtml(room.name)}</span><strong>${room.code}</strong></div>`).join("") || "<p class='hint'>아직 열린 기록실이 없습니다.</p>"}</div></div><button class="text-button" id="logout">운영자 로그아웃</button></div></div>`;
+    document.querySelector("#create").onclick = async () => { await api("/api/rooms", { method: "POST", headers: { Authorization: `Bearer ${state.operatorToken}` }, body: JSON.stringify({ name: document.querySelector("#room-name").value }) }); operatorPanel(); };
+    document.querySelector("#logout").onclick = () => { sessionStorage.removeItem("operatorToken"); state.operatorToken = null; landing(); };
+  } catch (err) { operatorLogin(err.message); }
+}
 function render() {
   const room = state.room;
-  app.innerHTML = `<div class="layout"><aside class="panel side"><div class="brand">✦ 기록실</div><div class="room-code"><small>INVITE CODE</small><div class="code">${room.code}</div></div><div class="nav-title">현재 기록</div><div class="nav-item active">◉ 실시간 장면</div><div class="nav-item">◇ 캐릭터 시트</div><div class="nav-item">▧ 사건 기록</div><div class="nav-title">플레이 가이드</div><p class="hint">메시지 앞의 형식을 바꾸어 서술, 대사, 메타 발언을 구분해 보세요.</p></aside><section class="panel content"><header class="topbar"><div><h2>${escapeHtml(room.name)}</h2><div class="term">${escapeHtml(room.term)} · ${room.members.length}명 접속 중</div></div><div class="phase">${escapeHtml(room.phase)}</div></header><div class="feed" id="feed"></div><form class="composer" id="composer"><select id="kind"><option value="rp">서술</option><option value="dialogue">대사</option><option value="ooc">메타</option></select><input class="input" id="message" placeholder="장면에 이어서 기록하기..." maxlength="600"><button class="primary">전송</button></form></section><aside class="panel right"><div class="section"><div class="section-title">현재 장면</div><h2>별관 복도의 첫 만남</h2><p class="hint">낡은 초상화들이 새 학기의 방문자들을 바라보고 있습니다.</p></div><div class="section"><div class="section-title">참여자</div><div id="members"></div></div><div class="section"><div class="section-title">성장 트랙 · 1학년</div><div class="mini-stat"><span>다음 사건까지</span><strong>25%</strong></div><div class="bar"><i style="width:25%"></i></div><div id="lessons"></div></div><div class="section"><div class="section-title">내 캐릭터</div><div class="character-empty">캐릭터 시트에서 기숙사, 지팡이, 두려움과 첫 능력치를 정해 보세요.</div></div></aside></div>`;
-  document.querySelector("#composer").onsubmit = async (event) => {
-    event.preventDefault();
-    const input = document.querySelector("#message");
-    if (!input.value.trim()) return;
-    await fetch(`/api/rooms/${room.code}/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ author: state.member.name, authorId: state.member.id, kind: document.querySelector("#kind").value, text: input.value }) });
-    input.value = "";
-  };
-  updateRoom(room);
+  const game = room.game || {};
+  app.innerHTML = `<div class="game-shell"><aside class="game-side"><div class="brand">✦ 기록실</div><div class="room-code"><small>INVITE CODE</small><div class="code">${room.code}</div></div><div class="profile"><div class="avatar">${escapeHtml(state.member.name.slice(0, 1))}</div><div><strong>${escapeHtml(state.member.name)}</strong><small>1학년 · 견습 마법사</small></div></div><div class="nav-title">학교</div><button class="nav-item ${state.view === "lobby" ? "active" : ""}" data-view="lobby">⌂ 연회장 로비</button><button class="nav-item ${state.view === "class" ? "active" : ""}" data-view="class">✦ 수업과 주문</button><button class="nav-item ${state.view === "explore" ? "active" : ""}" data-view="explore">⚔ 탐험과 전투</button><button class="nav-item ${state.view === "character" ? "active" : ""}" data-view="character">◇ 캐릭터 시트</button></aside><main class="game-main"><header class="game-top"><div><small>${escapeHtml(room.term)}</small><h2>${escapeHtml(room.name)}</h2></div><span class="phase">${escapeHtml(room.phase)}</span></header><div class="game-content" id="game-content"></div></main><aside class="game-right"><div class="section"><div class="section-title">현재 파티</div><div id="members"></div></div><div class="section"><div class="section-title">오늘의 목표</div><div class="quest"><strong>첫 번째 밤</strong><p>학교 주변에 나타난 그림자에 관한 소문을 확인하세요.</p><span>보상 · 경험치 30</span></div></div><div class="section"><div class="section-title">게임 알림</div><p class="hint">${escapeHtml(game.notice || "연회장에 새로운 소문이 도착했습니다.")}</p></div></aside></div>`;
+  document.querySelectorAll("[data-view]").forEach((button) => { button.onclick = () => { state.view = button.dataset.view; render(); }; });
+  document.querySelector("#members").innerHTML = room.members.map((member) => `<div class="member"><div class="avatar">${escapeHtml(member.name.slice(0, 1))}</div><span>${escapeHtml(member.name)}</span><i class="dot"></i></div>`).join("");
+  renderView();
 }
-
-function updateRoom(room) {
-  state.room = room;
-  const feed = document.querySelector("#feed");
-  if (!feed) return;
-  feed.innerHTML = `<div class="date">1991년 9월 1일 · 기록 시작</div>` + room.messages.map((message) => {
-    if (message.system) return `<div class="system">${escapeHtml(message.text)}</div>`;
-    const mine = message.authorId === state.member.id;
-    const label = message.kind === "dialogue" ? "대사" : message.kind === "ooc" ? "메타" : "서술";
-    return `<div class="message ${mine ? "mine" : ""}"><div class="avatar">${escapeHtml(message.author.slice(0, 1))}</div><div class="bubble"><div class="meta">${escapeHtml(message.author)} · ${label}</div><div class="text">${escapeHtml(message.text)}</div></div></div>`;
-  }).join("");
-  feed.scrollTop = feed.scrollHeight;
-  document.querySelector("#members").innerHTML = room.members.map((member) => `<div class="member"><div class="avatar">${escapeHtml(member.name.slice(0, 1))}</div><span>${escapeHtml(member.name)}${member.role === "guide" ? " · 가이드" : ""}</span><i class="dot"></i></div>`).join("");
-  document.querySelector("#lessons").innerHTML = room.lessons.map((lesson) => `<div class="lesson"><span>${lesson.icon} ${lesson.label}</span><strong>${lesson.level ? `Lv.${lesson.level}` : "잠김"}</strong></div>`).join("");
+function renderView() {
+  const root = document.querySelector("#game-content");
+  const game = state.room.game;
+  if (state.view === "lobby") root.innerHTML = `<div class="welcome"><div class="eyebrow">main hub · ${escapeHtml(game.locationLabel || "대연회장")}</div><h1>새 학기의 첫 저녁</h1><p>촛불이 떠 있는 대연회장. 네 기숙사의 테이블 사이로 수업, 소문, 그리고 성 밖의 위험에 관한 이야기가 흐릅니다.</p><div class="hub-grid"><button class="hub-card" data-location="classroom"><span>✦</span><strong>수업 게시판</strong><small>주문을 배우고 능력을 단련한다</small></button><button class="hub-card" data-location="library"><span>▤</span><strong>도서관</strong><small>단서와 마법 생물의 기록을 찾는다</small></button><button class="hub-card" data-location="grounds"><span>⚔</span><strong>성 바깥뜰</strong><small>적과 마주치고 전투를 시작한다</small></button><button class="hub-card" data-location="lobby"><span>⌂</span><strong>현관 로비</strong><small>다른 플레이어와 장면을 연다</small></button></div><div class="feed compact">${state.room.messages.slice(-5).map((m) => m.system ? `<div class="system">${escapeHtml(m.text)}</div>` : `<div class="log"><b>${escapeHtml(m.author)}</b> ${escapeHtml(m.text)}</div>`).join("")}</div></div>`;
+  if (state.view === "class") root.innerHTML = `<div class="welcome"><div class="eyebrow">academy systems</div><h1>수업과 주문</h1><p>수업을 통해 캐릭터의 능력을 키우고, 전투에서 선택할 주문을 준비합니다.</p><div class="lesson-grid">${state.room.lessons.map((lesson) => `<div class="lesson-card"><span>${lesson.icon}</span><strong>${lesson.label}</strong><small>${lesson.level ? `숙련도 Lv.${lesson.level} · 다음 수업 가능` : "아직 잠겨 있습니다"}</small><button class="ghost">수업 기록 보기</button></div>`).join("")}</div></div>`;
+  if (state.view === "explore") root.innerHTML = `<div class="welcome"><div class="eyebrow">encounter zone · ${escapeHtml(game.locationLabel || "성 바깥뜰")}</div><h1>탐험과 전투</h1><p>파티와 함께 위험한 장소를 조사합니다. 전투는 주사위와 능력치로 판정됩니다.</p>${game.combat ? combatView(game.combat) : `<div class="encounter-card"><span class="enemy-icon">☽</span><h2>어둠 속의 흔적</h2><p>바깥뜰의 오래된 석상 뒤에서 검은 연기가 피어오릅니다.</p><button class="primary" id="start-combat">전투 시작</button></div>`}</div>`;
+  if (state.view === "character") {
+    const member = state.room.members.find((item) => item.id === state.member.id) || state.member;
+    root.innerHTML = `<div class="welcome"><div class="eyebrow">character sheet</div><h1>${escapeHtml(member.name)}</h1><p>1학년 견습 마법사 · 아직 이름 붙지 않은 모험의 시작</p><div class="character-card"><div class="stat-head"><strong>생명력</strong><b>${member.hp || 20} / ${member.maxHp || 20}</b></div><div class="bar"><i style="width:${((member.hp || 20) / (member.maxHp || 20)) * 100}%"></i></div>${Object.entries(member.stats || { courage: 2, wit: 2, focus: 2 }).map(([key, value]) => `<div class="stat-row"><span>${({ courage: "용기", wit: "지혜", focus: "집중" })[key]}</span><strong>${value}</strong></div>`).join("")}<div class="xp">경험치 <strong>${member.xp || 0} / 100</strong></div></div></div>`;
+  }
+  document.querySelectorAll("[data-location]").forEach((button) => button.onclick = () => gameAction("location", { location: button.dataset.location }));
+  document.querySelector("#start-combat")?.addEventListener("click", () => gameAction("start-combat"));
+  document.querySelectorAll("[data-spell]").forEach((button) => button.onclick = () => gameAction("combat", { spell: button.dataset.spell }));
 }
-
+function combatView(combat) {
+  return `<div class="combat-card"><div class="combat-enemy"><span class="enemy-icon">☽</span><div><h2>${combat.enemy}</h2><small>야생 적 · ${combat.enemyHp} / ${combat.enemyMaxHp} HP</small><div class="bar enemy-bar"><i style="width:${combat.enemyHp / combat.enemyMaxHp * 100}%"></i></div></div></div><div class="combat-log">적이 어둠을 모아 공격 자세를 취합니다. 주문을 선택하세요.</div><div class="spell-actions"><button class="primary" data-spell="stupefy">기절 주문 <small>공격</small></button><button class="ghost" data-spell="shield">방패 주문 <small>회복</small></button><button class="ghost" data-spell="lumos">빛의 주문 <small>공격</small></button></div></div>`;
+}
+async function gameAction(action, extra = {}) {
+  try { state.room = await api(`/api/rooms/${state.room.code}/game`, { method: "POST", body: JSON.stringify({ action, memberId: state.member.id, ...extra }) }); render(); } catch (err) { alert(err.message); }
+}
 function connect() {
   state.stream = new EventSource(`/api/rooms/${state.room.code}/events`);
-  state.stream.addEventListener("room", (event) => updateRoom(JSON.parse(event.data)));
+  state.stream.addEventListener("room", (event) => { state.room = JSON.parse(event.data); render(); });
 }
-
 landing();

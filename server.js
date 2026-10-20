@@ -49,9 +49,10 @@ function publicRoom(room) {
     name: room.name,
     term: room.term,
     phase: room.phase,
-    members: room.members.map(({ id, name, role, character }) => ({ id, name, role, character })),
+    members: room.members.map(({ id, name, role, character, stats, hp, maxHp, xp, level }) => ({ id, name, role, character, stats, hp, maxHp, xp, level })),
     messages: room.messages,
-    lessons: room.lessons
+    lessons: room.lessons,
+    game: room.game
   };
 }
 
@@ -97,6 +98,12 @@ const server = http.createServer(async (req, res) => {
           id: crypto.randomUUID(), system: true, text: "기록실이 열렸습니다. 서로의 캐릭터를 소개해 주세요.", at: new Date().toISOString()
         }],
         lessons: starterLessons.map((lesson) => ({ ...lesson })),
+        game: {
+          location: "banquet",
+          locationLabel: "대연회장",
+          combat: null,
+          notice: "새 학기의 첫 저녁입니다. 연회장 곳곳에서 모험의 소문이 들려옵니다."
+        },
         clients: new Set()
       };
       rooms.set(room.code, room);
@@ -126,7 +133,12 @@ const server = http.createServer(async (req, res) => {
           id: crypto.randomUUID(),
           name: String(data.name || "익명의 마법사").slice(0, 24),
           role: "player",
-          character: data.character || null
+          character: data.character || null,
+          stats: { courage: 2, wit: 2, focus: 2 },
+          hp: 20,
+          maxHp: 20,
+          xp: 0,
+          level: 1
         };
         room.members.push(member);
         addMessage(room, { system: true, text: `${member.name}님이 기록실에 들어왔습니다.` });
@@ -142,6 +154,70 @@ const server = http.createServer(async (req, res) => {
           text: String(data.text).slice(0, 600)
         });
         return json(res, 201, { ok: true });
+      }
+
+    }
+
+    const gameMatch = url.pathname.match(/^\/api\/rooms\/([A-Z0-9]+)\/game$/);
+    if (gameMatch && req.method === "POST") {
+        const room = rooms.get(gameMatch[1]);
+        if (!room) return json(res, 404, { error: "기록실을 찾을 수 없습니다." });
+        const data = await body(req);
+        const member = room.members.find((item) => item.id === data.memberId);
+        if (!member) return json(res, 403, { error: "참가자 세션을 확인할 수 없습니다." });
+        if (data.action === "location") {
+          const locations = {
+            banquet: "대연회장",
+            lobby: "현관 로비",
+            library: "도서관",
+            classroom: "주문학 교실",
+            grounds: "성 바깥뜰"
+          };
+          if (!locations[data.location]) return json(res, 400, { error: "알 수 없는 장소입니다." });
+          room.game.location = data.location;
+          room.game.locationLabel = locations[data.location];
+          room.game.notice = `${member.name}님이 ${locations[data.location]}으로 이동했습니다.`;
+          addMessage(room, { system: true, text: room.game.notice });
+          return json(res, 200, publicRoom(room));
+        }
+        if (data.action === "start-combat") {
+          if (room.game.combat) return json(res, 409, { error: "이미 진행 중인 전투가 있습니다." });
+          room.game.combat = { enemy: "그림자 망령", enemyHp: 24, enemyMaxHp: 24, turn: "players", round: 1 };
+          room.game.location = "grounds";
+          room.game.locationLabel = "성 바깥뜰";
+          room.game.notice = `${member.name}님이 어둠 속의 적을 발견했습니다. 모두가 주문을 준비합니다.`;
+          addMessage(room, { system: true, text: room.game.notice });
+          return json(res, 200, publicRoom(room));
+        }
+        if (data.action === "combat") {
+          const combat = room.game.combat;
+          if (!combat) return json(res, 409, { error: "진행 중인 전투가 없습니다." });
+          if (combat.turn !== "players") return json(res, 409, { error: "적의 차례를 기다리는 중입니다." });
+          const spell = { stupefy: ["기절 주문", 7], shield: ["방패 주문", 0], lumos: ["빛의 주문", 3] }[data.spell];
+          if (!spell) return json(res, 400, { error: "사용할 수 없는 주문입니다." });
+          const roll = Math.floor(Math.random() * 6) + 1;
+          const power = spell[1] + roll + member.stats.focus;
+          let text = `${member.name}님이 ${spell[0]}을 사용했습니다. (주사위 ${roll})`;
+          if (data.spell === "shield") {
+            member.hp = Math.min(member.maxHp, member.hp + 2);
+            text += " 방패가 몸을 감싸며 체력을 회복합니다.";
+          } else {
+            combat.enemyHp = Math.max(0, combat.enemyHp - power);
+            text += ` ${power} 피해!`;
+          }
+          if (combat.enemyHp <= 0) {
+            member.xp += 30;
+            room.game.combat = null;
+            room.game.notice = "전투에서 승리했습니다. 새로운 주문의 실마리를 얻었습니다.";
+            text += " 그림자 망령이 흩어집니다.";
+          } else {
+            const enemyRoll = Math.floor(Math.random() * 6) + 1;
+            const damage = Math.max(1, enemyRoll + 2 - member.stats.courage);
+            member.hp = Math.max(0, member.hp - damage);
+            text += ` 적의 반격으로 ${damage} 피해를 입었습니다.`;
+          }
+          addMessage(room, { system: true, text });
+          return json(res, 200, publicRoom(room));
       }
     }
 
