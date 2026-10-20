@@ -75,7 +75,11 @@ function combatView(combat) {
   return `<div class="combat-card"><div class="combat-head"><span class="phase">${escapeHtml(result)}</span><span class="round-badge">ROUND ${combat.round}</span></div><div class="combat-enemy"><span class="enemy-icon">☽</span><div><h2>${escapeHtml(combat.enemy.name)}</h2><small>그림자 계열 · ${combat.enemyHp} / ${combat.enemyMaxHp} HP</small><div class="bar enemy-bar"><i style="width:${combat.enemyHp / combat.enemyMaxHp * 100}%"></i></div></div></div><div class="initiative"><strong>행동 순서</strong>${combat.turnOrder.map((id, index) => { const player = state.room.members.find((member) => member.id === id); return `<span class="${index === combat.activeIndex && combat.status === "active" ? "turn-active" : ""}">${index + 1}. ${escapeHtml(player?.name || "플레이어")}</span>`; }).join("")}</div><div class="combat-log">${combat.log.slice(-5).reverse().map((entry) => `<div><small>R${entry.round}</small>${escapeHtml(entry.text)}</div>`).join("")}</div><div class="turn-callout">${combat.status === "active" ? `${escapeHtml(active?.name || "플레이어")}의 차례입니다.${canAct ? " 행동을 선택하세요." : " 다른 플레이어의 행동을 기다리세요."}` : result}</div><div class="spell-actions"><button class="primary" data-spell="stupefy" ${canAct ? "" : "disabled"}>기절 주문 <small>집중 · 공격</small></button><button class="ghost" data-spell="lumos" ${canAct ? "" : "disabled"}>빛의 주문 <small>지혜 · 공격</small></button><button class="ghost" data-spell="shield" ${canAct ? "" : "disabled"}>방패 주문 <small>용기 · 방어/회복</small></button><button class="ghost" data-spell="focus" ${canAct ? "" : "disabled"}>집중 <small>다음 공격 강화</small></button></div>${combat.status !== "active" ? `<button class="text-button reset-combat" id="reset-combat">전투 기록 닫기</button>` : ""}</div>`;
 }
 async function gameAction(action, extra = {}) {
-  try { state.room = await api(`/api/rooms/${state.room.code}/game`, { method: "POST", body: JSON.stringify({ action, memberId: state.member.id, ...extra }) }); render(); } catch (err) { alert(err.message); }
+  try {
+    state.room = await api(`/api/rooms/${state.room.code}/game`, { method: "POST", body: JSON.stringify({ action, memberId: state.member.id, ...extra }) });
+    if (action === "start-combat") state.view = "explore";
+    render();
+  } catch (err) { alert(err.message); }
 }
 function connect() {
   state.stream = new EventSource(`/api/rooms/${state.room.code}/events`);
