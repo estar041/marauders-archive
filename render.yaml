@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: marauders-archive
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: OPERATOR_CODE
+        sync: false

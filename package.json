@@ -1,0 +1,9 @@
+{
+  "name": "marauders-archive",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A small invite-only wizarding school TPRG web game.",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
