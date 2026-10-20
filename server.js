@@ -67,6 +67,38 @@ function addMessage(room, message) {
   broadcast(room);
 }
 
+function aliveMembers(room, combat) {
+  return combat.turnOrder
+    .map((id) => room.members.find((member) => member.id === id))
+    .filter((member) => member && member.hp > 0);
+}
+
+function combatLog(combat, text) {
+  combat.log.push({ text, round: combat.round, at: new Date().toISOString() });
+  if (combat.log.length > 30) combat.log.shift();
+}
+
+function enemyTurn(room, combat) {
+  const targets = aliveMembers(room, combat);
+  if (!targets.length) return;
+  const target = targets[Math.floor(Math.random() * targets.length)];
+  const roll = Math.floor(Math.random() * 6) + 1;
+  const damage = Math.max(1, roll + combat.enemy.power - (target.guarding ? 3 : 0));
+  target.hp = Math.max(0, target.hp - damage);
+  target.guarding = false;
+  combatLog(combat, `${combat.enemy.name}이(가) ${target.name}에게 ${damage} 피해를 입혔습니다. (적 주사위 ${roll})`);
+  if (!aliveMembers(room, combat).length) {
+    combat.status = "defeat";
+    combat.phase = "finished";
+    room.game.notice = "모두 쓰러졌습니다. 연회장으로 후퇴했습니다.";
+    return;
+  }
+  combat.round += 1;
+  combat.phase = "players";
+  combat.activeIndex = 0;
+  combat.turnOrder = room.members.filter((member) => member.hp > 0).map((member) => member.id);
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   try {
@@ -182,7 +214,22 @@ const server = http.createServer(async (req, res) => {
         }
         if (data.action === "start-combat") {
           if (room.game.combat) return json(res, 409, { error: "이미 진행 중인 전투가 있습니다." });
-          room.game.combat = { enemy: "그림자 망령", enemyHp: 24, enemyMaxHp: 24, turn: "players", round: 1 };
+          if (!room.members.length) return json(res, 409, { error: "전투에 참가할 플레이어가 없습니다." });
+          room.members.forEach((player) => {
+            player.hp = player.maxHp;
+            player.guarding = false;
+          });
+          room.game.combat = {
+            enemy: { name: "그림자 망령", power: 2 },
+            enemyHp: 42,
+            enemyMaxHp: 42,
+            phase: "players",
+            status: "active",
+            round: 1,
+            activeIndex: 0,
+            turnOrder: room.members.map((player) => player.id),
+            log: ["그림자 망령이 나타났습니다. 파티의 첫 번째 플레이어부터 행동합니다."]
+          };
           room.game.location = "grounds";
           room.game.locationLabel = "성 바깥뜰";
           room.game.notice = `${member.name}님이 어둠 속의 적을 발견했습니다. 모두가 주문을 준비합니다.`;
@@ -192,33 +239,58 @@ const server = http.createServer(async (req, res) => {
         if (data.action === "combat") {
           const combat = room.game.combat;
           if (!combat) return json(res, 409, { error: "진행 중인 전투가 없습니다." });
-          if (combat.turn !== "players") return json(res, 409, { error: "적의 차례를 기다리는 중입니다." });
-          const spell = { stupefy: ["기절 주문", 7], shield: ["방패 주문", 0], lumos: ["빛의 주문", 3] }[data.spell];
+          if (combat.status !== "active") return json(res, 409, { error: "이미 끝난 전투입니다." });
+          if (combat.phase !== "players") return json(res, 409, { error: "적의 차례를 기다리는 중입니다." });
+          const activeId = combat.turnOrder[combat.activeIndex];
+          if (activeId !== member.id) return json(res, 409, { error: "아직 당신의 차례가 아닙니다." });
+          const spell = {
+            stupefy: { label: "기절 주문", power: 7, stat: "focus" },
+            lumos: { label: "빛의 주문", power: 4, stat: "wit" },
+            shield: { label: "방패 주문", power: 0, stat: "courage" },
+            focus: { label: "집중", power: 0, stat: "focus" }
+          }[data.spell];
           if (!spell) return json(res, 400, { error: "사용할 수 없는 주문입니다." });
           const roll = Math.floor(Math.random() * 6) + 1;
-          const power = spell[1] + roll + member.stats.focus;
-          let text = `${member.name}님이 ${spell[0]}을 사용했습니다. (주사위 ${roll})`;
+          const power = spell.power + roll + member.stats[spell.stat];
+          let text = `${member.name}님이 ${spell.label}을 사용했습니다. (주사위 ${roll})`;
           if (data.spell === "shield") {
-            member.hp = Math.min(member.maxHp, member.hp + 2);
-            text += " 방패가 몸을 감싸며 체력을 회복합니다.";
+            member.guarding = true;
+            member.hp = Math.min(member.maxHp, member.hp + 3);
+            text += " 방패가 몸을 감싸고 3 체력을 회복합니다.";
+          } else if (data.spell === "focus") {
+            member.focused = true;
+            text += " 다음 주문의 판정에 집중합니다.";
           } else {
-            combat.enemyHp = Math.max(0, combat.enemyHp - power);
-            text += ` ${power} 피해!`;
+            const focusedBonus = member.focused ? 3 : 0;
+            member.focused = false;
+            const totalPower = power + focusedBonus;
+            combat.enemyHp = Math.max(0, combat.enemyHp - totalPower);
+            text += ` ${totalPower} 피해!`;
           }
+          combatLog(combat, text);
           if (combat.enemyHp <= 0) {
-            member.xp += 30;
-            room.game.combat = null;
-            room.game.notice = "전투에서 승리했습니다. 새로운 주문의 실마리를 얻었습니다.";
-            text += " 그림자 망령이 흩어집니다.";
+            combat.status = "victory";
+            combat.phase = "finished";
+            room.game.notice = "전투에서 승리했습니다. 파티가 새로운 단서를 손에 넣었습니다.";
+            room.members.forEach((player) => { player.xp += 30; });
           } else {
-            const enemyRoll = Math.floor(Math.random() * 6) + 1;
-            const damage = Math.max(1, enemyRoll + 2 - member.stats.courage);
-            member.hp = Math.max(0, member.hp - damage);
-            text += ` 적의 반격으로 ${damage} 피해를 입었습니다.`;
+            combat.activeIndex += 1;
+            if (combat.activeIndex >= combat.turnOrder.length) {
+              combat.phase = "enemy";
+              enemyTurn(room, combat);
+            }
           }
           addMessage(room, { system: true, text });
           return json(res, 200, publicRoom(room));
-      }
+        }
+        if (data.action === "reset-combat") {
+          if (!room.game.combat || room.game.combat.status === "active") {
+            return json(res, 409, { error: "종료된 전투만 다시 시작할 수 있습니다." });
+          }
+          room.game.combat = null;
+          room.game.notice = "성 바깥뜰에 다시 정적이 내려앉았습니다.";
+          return json(res, 200, publicRoom(room));
+        }
     }
 
     const file = url.pathname === "/" ? "/index.html" : url.pathname;
