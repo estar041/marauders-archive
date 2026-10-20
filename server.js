@@ -16,6 +16,19 @@ const starterLessons = [
   { id: "care", label: "신비한 동물 돌보기", icon: "❋", level: 0 }
 ];
 
+const itemCatalog = {
+  "달빛 약초": { weight: 0.5, use: "마법약 재료" },
+  "회복 물약": { weight: 1, use: "사용 시 체력 8 회복" },
+  "학교 지도": { weight: 0.2, use: "마을에서 얻는 영구 소지품" }
+};
+const inventoryRules = { carryCapacity: 10, storageCapacity: 20 };
+const lessonRewards = {
+  charms: { xp: 12, stat: "focus", coins: 3, text: "집중" },
+  defense: { xp: 12, stat: "courage", coins: 3, text: "용기" },
+  potions: { xp: 15, stat: "wit", coins: 4, text: "지혜" },
+  care: { xp: 10, stat: "wit", coins: 2, text: "지혜" }
+};
+
 const locations = {
   banquet: { label: "대연회장", description: "새 학기의 소문과 파티가 시작되는 중앙 허브", icon: "♜", type: "hub" },
   lobby: { label: "현관 로비", description: "약속과 만남이 모이는 넓은 홀", icon: "⌂", type: "social" },
@@ -64,12 +77,43 @@ function publicRoom(room) {
     name: room.name,
     term: room.term,
     phase: room.phase,
-    members: room.members.map(({ id, name, role, character, characterSheet, stats, hp, maxHp, xp, level, inventory }) => ({ id, name, role, character, characterSheet, stats, hp, maxHp, xp, level, inventory })),
+    members: room.members.map(({ id, name, role, character, characterSheet, stats, hp, maxHp, xp, level, inventory, storage, coins, lessonProgress }) => ({ id, name, role, character, characterSheet, stats, hp, maxHp, xp, level, inventory, storage, coins, lessonProgress })),
     messages: room.messages,
     lessons: room.lessons,
     game: room.game,
     locations
   };
+}
+
+function itemWeight(items = []) {
+  return items.reduce((total, item) => total + (itemCatalog[item]?.weight || 1), 0);
+}
+
+function addItem(member, item, destination = "inventory") {
+  const list = member[destination] || (member[destination] = []);
+  const limit = destination === "storage" ? inventoryRules.storageCapacity : inventoryRules.carryCapacity;
+  if (destination === "storage" && list.length >= limit) return false;
+  if (destination === "inventory" && itemWeight([...list, item]) > limit) return false;
+  list.push(item);
+  return true;
+}
+
+function removeItem(member, item, source = "inventory") {
+  const list = member[source] || [];
+  const index = list.indexOf(item);
+  if (index === -1) return false;
+  list.splice(index, 1);
+  return true;
+}
+
+function awardXp(member, amount) {
+  member.xp += amount;
+  while (member.xp >= 100) {
+    member.xp -= 100;
+    member.level += 1;
+    member.maxHp += 2;
+    member.hp = member.maxHp;
+  }
 }
 
 function broadcast(room) {
@@ -105,34 +149,41 @@ function interactAtLocation(room, member, action) {
   if (action === "study") {
     const stat = room.game.location === "library" ? "wit" : "focus";
     member.stats[stat] += 1;
-    member.xp += 10;
+    awardXp(member, 10);
     room.game.notice = `${member.name}님이 ${location.label}에서 공부해 ${stat === "wit" ? "지혜" : "집중"}이 1 올랐습니다.`;
     return room.game.notice;
   }
   if (action === "gather") {
-    member.inventory = member.inventory || [];
-    member.inventory.push("달빛 약초");
-    member.xp += 5;
+    if (!addItem(member, "달빛 약초")) return "소지 한도가 가득 찼습니다. 창고에 물건을 보관해 주세요.";
+    awardXp(member, 5);
     room.game.notice = `${member.name}님이 온실에서 달빛 약초를 채집했습니다.`;
     return room.game.notice;
   }
   if (action === "brew") {
-    member.inventory = member.inventory || [];
-    const herbIndex = member.inventory.indexOf("달빛 약초");
-    if (herbIndex === -1) return "달빛 약초가 필요합니다. 온실에서 먼저 채집해 주세요.";
-    member.inventory.splice(herbIndex, 1);
-    member.inventory.push("회복 물약");
+    if (!removeItem(member, "달빛 약초")) return "달빛 약초가 필요합니다. 온실에서 먼저 채집해 주세요.";
+    if (!addItem(member, "회복 물약")) {
+      addItem(member, "달빛 약초");
+      return "소지 한도가 가득 차 회복 물약을 만들 수 없습니다.";
+    }
+    awardXp(member, 8);
     room.game.notice = `${member.name}님이 회복 물약을 만들었습니다.`;
     return room.game.notice;
   }
   if (action === "shop") {
-    member.inventory = member.inventory || [];
-    member.inventory.push("학교 지도");
+    if (member.inventory.includes("학교 지도")) return "이미 학교 지도를 가지고 있습니다.";
+    if (!addItem(member, "학교 지도")) return "소지 한도가 가득 찼습니다.";
     room.game.notice = `${member.name}님이 마을 거리에서 학교 지도를 얻었습니다.`;
     return room.game.notice;
   }
+  if (action === "buy-potion") {
+    if (member.coins < 8) return "회복 물약은 8갈레온입니다.";
+    if (!addItem(member, "회복 물약")) return "소지 한도가 가득 찼습니다.";
+    member.coins -= 8;
+    room.game.notice = `${member.name}님이 8갈레온을 내고 회복 물약을 샀습니다.`;
+    return room.game.notice;
+  }
   if (action === "investigate") {
-    member.xp += 8;
+    awardXp(member, 8);
     room.game.notice = `${member.name}님이 ${location.label}에서 새로운 사건의 단서를 발견했습니다.`;
     return room.game.notice;
   }
@@ -243,7 +294,10 @@ const server = http.createServer(async (req, res) => {
           maxHp: 20,
           xp: 0,
           level: 1,
-          inventory: []
+          inventory: [],
+          storage: [],
+          coins: 30,
+          lessonProgress: {}
         };
         room.members.push(member);
         addMessage(room, { system: true, text: `${member.name}님이 기록실에 들어왔습니다.` });
@@ -304,7 +358,7 @@ const server = http.createServer(async (req, res) => {
             tower: ["investigate", "study"],
             greenhouse: ["gather"],
             potions: ["brew"],
-            village: ["shop"],
+            village: ["shop", "buy-potion"],
             lake: ["investigate"],
             lobby: ["investigate"],
             banquet: ["investigate"],
@@ -315,7 +369,48 @@ const server = http.createServer(async (req, res) => {
             return json(res, 400, { error: "현재 장소에서는 할 수 없는 행동입니다." });
           }
           const message = interactAtLocation(room, member, data.interaction);
-          if (message.endsWith("필요합니다. 온실에서 먼저 채집해 주세요.")) return json(res, 409, { error: message });
+          if (message.includes("필요합니다") || message.includes("한도") || message.includes("갈레온") || message.includes("이미")) return json(res, 409, { error: message });
+          addMessage(room, { system: true, text: message });
+          return json(res, 200, publicRoom(room));
+        }
+        if (data.action === "lesson") {
+          const reward = lessonRewards[data.lesson];
+          if (!reward) return json(res, 400, { error: "알 수 없는 수업입니다." });
+          member.lessonProgress = member.lessonProgress || {};
+          member.lessonProgress[data.lesson] = (member.lessonProgress[data.lesson] || 0) + 1;
+          member.stats[reward.stat] += 1;
+          member.coins += reward.coins;
+          awardXp(member, reward.xp);
+          const message = `${member.name}님이 ${data.lesson} 수업을 완료했습니다. 경험치 +${reward.xp}, ${reward.text} +1, ${reward.coins}갈레온을 얻었습니다.`;
+          addMessage(room, { system: true, text: message });
+          return json(res, 200, publicRoom(room));
+        }
+        if (data.action === "item") {
+          member.inventory = member.inventory || [];
+          member.storage = member.storage || [];
+          const item = String(data.item || "");
+          if (!itemCatalog[item]) return json(res, 400, { error: "알 수 없는 아이템입니다." });
+          if (data.itemAction === "store") {
+            if (!removeItem(member, item)) return json(res, 409, { error: "소지품에 해당 아이템이 없습니다." });
+            if (!addItem(member, item, "storage")) {
+              addItem(member, item);
+              return json(res, 409, { error: "개인 창고가 가득 찼습니다." });
+            }
+          } else if (data.itemAction === "take") {
+            if (!removeItem(member, item, "storage")) return json(res, 409, { error: "개인 창고에 해당 아이템이 없습니다." });
+            if (!addItem(member, item)) {
+              addItem(member, item, "storage");
+              return json(res, 409, { error: "들 수 있는 무게를 초과합니다." });
+            }
+          } else if (data.itemAction === "use") {
+            if (item !== "회복 물약" || !removeItem(member, item)) return json(res, 409, { error: "지금 사용할 수 없는 아이템입니다." });
+            member.hp = Math.min(member.maxHp, member.hp + 8);
+          } else {
+            return json(res, 400, { error: "알 수 없는 아이템 행동입니다." });
+          }
+          const message = data.itemAction === "use"
+            ? `${member.name}님이 회복 물약을 사용해 체력을 회복했습니다.`
+            : `${member.name}님이 ${item}을 ${data.itemAction === "store" ? "개인 창고에 보관했습니다" : "꺼냈습니다"}.`;
           addMessage(room, { system: true, text: message });
           return json(res, 200, publicRoom(room));
         }
@@ -379,7 +474,7 @@ const server = http.createServer(async (req, res) => {
             combat.status = "victory";
             combat.phase = "finished";
             room.game.notice = "전투에서 승리했습니다. 파티가 새로운 단서를 손에 넣었습니다.";
-            room.members.forEach((player) => { player.xp += 30; });
+            room.members.forEach((player) => { awardXp(player, 30); player.coins += 12; });
           } else {
             combat.activeIndex += 1;
             if (combat.activeIndex >= combat.turnOrder.length) {
