@@ -47,19 +47,38 @@ function renderView() {
   const locations = state.room.locations || {};
   if (state.view === "map") {
     const tiles = ["tower", "library", "classroom", "greenhouse", "banquet", "lobby", "potions", "infirmary", "dueling", "grounds", "lake", "village"];
-    root.innerHTML = `<div class="view-intro"><div class="eyebrow">school atlas · ${esc(state.room.game.locationLabel)}</div><h1>학교 지도</h1><p>타일을 선택해 장소를 이동하세요. 장소마다 수업, 조사, 회복, 사회 장면, 전투가 기다리고 있습니다.</p></div><div class="map-grid">${tiles.map((id) => { const spot = locations[id]; return `<button class="map-tile ${id === state.room.game.location ? "current" : ""} type-${spot.type}" data-location="${id}"><span class="tile-icon">${spot.icon}</span><strong>${esc(spot.label)}</strong><small>${esc(spot.description)}</small><em>${id === state.room.game.location ? "현재 위치" : spot.type === "combat" ? "위험 지역" : "이동하기"}</em></button>`; }).join("")}</div>`;
+    const current = locations[state.room.game.location];
+    root.innerHTML = `<div class="view-intro"><div class="eyebrow">school atlas · ${esc(state.room.game.locationLabel)}</div><h1>학교 지도</h1><p>타일을 선택해 장소를 이동하세요. 장소마다 수업, 조사, 회복, 사회 장면, 전투가 기다리고 있습니다.</p></div><div class="map-grid">${tiles.map((id) => { const spot = locations[id]; return `<button class="map-tile ${id === state.room.game.location ? "current" : ""} type-${spot.type}" data-location="${id}"><span class="tile-icon">${spot.icon}</span><strong>${esc(spot.label)}</strong><small>${esc(spot.description)}</small><em>${id === state.room.game.location ? "현재 위치" : spot.type === "combat" ? "위험 지역" : "이동하기"}</em></button>`; }).join("")}</div><div class="location-actions"><div><span class="eyebrow">${esc(current.label)} · ${esc(current.type)}</span><h3>이 장소에서 할 일</h3></div><div class="action-buttons">${locationActions(state.room.game.location)}</div></div>`;
   } else if (state.view === "character") renderCharacter(root);
   else if (state.view === "class") root.innerHTML = `<div class="view-intro"><div class="eyebrow">academy systems</div><h1>수업과 주문</h1><p>수업을 선택하면 능력치와 전투 선택지가 확장됩니다.</p><div class="lesson-grid">${state.room.lessons.map((lesson) => `<div class="lesson-card"><span>${lesson.icon}</span><strong>${esc(lesson.label)}</strong><small>${lesson.level ? `숙련도 Lv.${lesson.level}` : "잠겨 있음"}</small><button class="ghost" data-lesson="${lesson.id}">수업 기록 보기</button></div>`).join("")}</div>`;
   else renderCombat(root);
   document.querySelectorAll("[data-location]").forEach((tile) => tile.onclick = () => gameAction("location", { location: tile.dataset.location }));
+  document.querySelectorAll("[data-interaction]").forEach((button) => button.onclick = () => gameAction("interact", { interaction: button.dataset.interaction }));
   document.querySelectorAll("[data-spell]").forEach((button) => button.onclick = () => gameAction("combat", { spell: button.dataset.spell }));
   document.querySelector("#start-combat")?.addEventListener("click", () => gameAction("start-combat"));
   document.querySelector("#reset-combat")?.addEventListener("click", () => gameAction("reset-combat"));
 }
+function locationActions(location) {
+  const actions = {
+    infirmary: [["recover", "완전히 회복하기", "체력을 모두 회복합니다."]],
+    classroom: [["study", "수업 복습하기", "집중 +1 · 경험치 +10"]],
+    library: [["investigate", "책장 조사하기", "사건 단서 · 경험치 +8"], ["study", "자료 연구하기", "지혜 +1 · 경험치 +10"]],
+    tower: [["investigate", "별자리 기록 읽기", "사건 단서 · 경험치 +8"], ["study", "천문 관측하기", "집중 +1 · 경험치 +10"]],
+    greenhouse: [["gather", "약초 채집하기", "달빛 약초 획득"]],
+    potions: [["brew", "회복 물약 만들기", "달빛 약초 1개 필요"]],
+    village: [["shop", "거리 상점 둘러보기", "학교 지도 획득"]],
+    lake: [["investigate", "선착장 조사하기", "사건 단서 · 경험치 +8"]],
+    lobby: [["investigate", "게시판 확인하기", "새 소문 확인 · 경험치 +8"]],
+    banquet: [["investigate", "연회장 소문 듣기", "새 사건 단서 · 경험치 +8"]],
+    dueling: [["investigate", "결투 기록 보기", "전투 정보 · 경험치 +8"]],
+    grounds: [["investigate", "흔적 조사하기", "전투 단서 · 경험치 +8"]]
+  };
+  return (actions[location] || []).map(([id, label, help]) => `<button class="action-button" data-interaction="${id}"><strong>${label}</strong><small>${help}</small></button>`).join("") || "<p class='hint'>여기서는 자유롭게 RP를 이어가세요.</p>";
+}
 function renderCharacter(root) {
   const member = state.room.members.find((item) => item.id === state.member.id) || state.member;
   const sheet = member.characterSheet || {};
-  root.innerHTML = `<div class="view-intro"><div class="eyebrow">character dossier</div><h1>캐릭터 설정</h1><p>이 기록은 장면과 판정의 재료가 됩니다. 공개하고 싶은 만큼만 작성하세요.</p></div><form id="character-form" class="character-form"><div class="form-section"><h3>기본 정보</h3><div class="form-grid"><label>캐릭터 이름<input class="input" name="name" value="${esc(member.name)}"></label><label>호칭 / 별명<input class="input" name="alias" value="${esc(sheet.alias)}"></label><label>기숙사 또는 소속<input class="input" name="house" value="${esc(sheet.house)}" placeholder="예: 북쪽 탑"></label><label>출신 배경<input class="input" name="origin" value="${esc(sheet.origin)}" placeholder="예: 마법사 가문"></label></div></div><div class="form-section"><h3>마법과 성향</h3><div class="form-grid"><label>지팡이 / 도구<input class="input" name="wand" value="${esc(sheet.wand)}"></label><label>성격 키워드<input class="input" name="temperament" value="${esc(sheet.temperament)}" placeholder="예: 호기심, 신중함"></label><label>가장 두려운 것<input class="input" name="fear" value="${esc(sheet.fear)}"></label><label class="wide">캐릭터 배경<textarea class="input" name="background" rows="4">${esc(sheet.background)}</textarea></label></div></div><div class="character-stats"><div><span>용기</span><strong>${member.stats.courage}</strong></div><div><span>지혜</span><strong>${member.stats.wit}</strong></div><div><span>집중</span><strong>${member.stats.focus}</strong></div><div><span>경험치</span><strong>${member.xp} / 100</strong></div></div><button class="primary save-character">캐릭터 시트 저장</button><p id="character-status" class="hint"></p></form>`;
+  root.innerHTML = `<div class="view-intro"><div class="eyebrow">character dossier</div><h1>캐릭터 설정</h1><p>이 기록은 장면과 판정의 재료가 됩니다. 공개하고 싶은 만큼만 작성하세요.</p></div><form id="character-form" class="character-form"><div class="form-section"><h3>기본 정보</h3><div class="form-grid"><label>캐릭터 이름<input class="input" name="name" value="${esc(member.name)}"></label><label>호칭 / 별명<input class="input" name="alias" value="${esc(sheet.alias)}"></label><label>기숙사 또는 소속<input class="input" name="house" value="${esc(sheet.house)}" placeholder="예: 북쪽 탑"></label><label>출신 배경<input class="input" name="origin" value="${esc(sheet.origin)}" placeholder="예: 마법사 가문"></label></div></div><div class="form-section"><h3>마법과 성향</h3><div class="form-grid"><label>지팡이 / 도구<input class="input" name="wand" value="${esc(sheet.wand)}"></label><label>성격 키워드<input class="input" name="temperament" value="${esc(sheet.temperament)}" placeholder="예: 호기심, 신중함"></label><label>가장 두려운 것<input class="input" name="fear" value="${esc(sheet.fear)}"></label><label class="wide">캐릭터 배경<textarea class="input" name="background" rows="4">${esc(sheet.background)}</textarea></label></div></div><div class="character-stats"><div><span>용기</span><strong>${member.stats.courage}</strong></div><div><span>지혜</span><strong>${member.stats.wit}</strong></div><div><span>집중</span><strong>${member.stats.focus}</strong></div><div><span>경험치</span><strong>${member.xp} / 100</strong></div></div><div class="inventory-box"><h3>소지품</h3><p>${(member.inventory || []).map(esc).join(" · ") || "아직 발견한 물건이 없습니다."}</p></div><button class="primary save-character">캐릭터 시트 저장</button><p id="character-status" class="hint"></p></form>`;
   document.querySelector("#character-form").onsubmit = async (event) => { event.preventDefault(); const data = Object.fromEntries(new FormData(event.currentTarget)); try { state.member = await api(`/api/rooms/${state.room.code}/members`, { method: "PATCH", body: JSON.stringify({ memberId: state.member.id, name: data.name, characterSheet: data }) }); document.querySelector("#character-status").textContent = "저장되었습니다."; } catch (e) { document.querySelector("#character-status").textContent = e.message; } };
 }
 function renderCombat(root) {

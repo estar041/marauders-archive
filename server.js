@@ -64,7 +64,7 @@ function publicRoom(room) {
     name: room.name,
     term: room.term,
     phase: room.phase,
-    members: room.members.map(({ id, name, role, character, characterSheet, stats, hp, maxHp, xp, level }) => ({ id, name, role, character, characterSheet, stats, hp, maxHp, xp, level })),
+    members: room.members.map(({ id, name, role, character, characterSheet, stats, hp, maxHp, xp, level, inventory }) => ({ id, name, role, character, characterSheet, stats, hp, maxHp, xp, level, inventory })),
     messages: room.messages,
     lessons: room.lessons,
     game: room.game,
@@ -94,6 +94,51 @@ function combatLog(combat, text) {
   if (combat.log.length > 30) combat.log.shift();
 }
 
+function interactAtLocation(room, member, action) {
+  const location = locations[room.game.location];
+  if (!location) return "현재 장소를 확인할 수 없습니다.";
+  if (action === "recover") {
+    member.hp = member.maxHp;
+    room.game.notice = `${member.name}님이 치유실에서 완전히 회복했습니다.`;
+    return room.game.notice;
+  }
+  if (action === "study") {
+    const stat = room.game.location === "library" ? "wit" : "focus";
+    member.stats[stat] += 1;
+    member.xp += 10;
+    room.game.notice = `${member.name}님이 ${location.label}에서 공부해 ${stat === "wit" ? "지혜" : "집중"}이 1 올랐습니다.`;
+    return room.game.notice;
+  }
+  if (action === "gather") {
+    member.inventory = member.inventory || [];
+    member.inventory.push("달빛 약초");
+    member.xp += 5;
+    room.game.notice = `${member.name}님이 온실에서 달빛 약초를 채집했습니다.`;
+    return room.game.notice;
+  }
+  if (action === "brew") {
+    member.inventory = member.inventory || [];
+    const herbIndex = member.inventory.indexOf("달빛 약초");
+    if (herbIndex === -1) return "달빛 약초가 필요합니다. 온실에서 먼저 채집해 주세요.";
+    member.inventory.splice(herbIndex, 1);
+    member.inventory.push("회복 물약");
+    room.game.notice = `${member.name}님이 회복 물약을 만들었습니다.`;
+    return room.game.notice;
+  }
+  if (action === "shop") {
+    member.inventory = member.inventory || [];
+    member.inventory.push("학교 지도");
+    room.game.notice = `${member.name}님이 마을 거리에서 학교 지도를 얻었습니다.`;
+    return room.game.notice;
+  }
+  if (action === "investigate") {
+    member.xp += 8;
+    room.game.notice = `${member.name}님이 ${location.label}에서 새로운 사건의 단서를 발견했습니다.`;
+    return room.game.notice;
+  }
+  return "이 장소에서 할 수 없는 행동입니다.";
+}
+
 function enemyTurn(room, combat) {
   const targets = aliveMembers(room, combat);
   if (!targets.length) return;
@@ -109,6 +154,7 @@ function enemyTurn(room, combat) {
     room.game.notice = "모두 쓰러졌습니다. 연회장으로 후퇴했습니다.";
     return;
   }
+
   combat.round += 1;
   combat.phase = "players";
   combat.activeIndex = 0;
@@ -196,7 +242,8 @@ const server = http.createServer(async (req, res) => {
           hp: 20,
           maxHp: 20,
           xp: 0,
-          level: 1
+          level: 1,
+          inventory: []
         };
         room.members.push(member);
         addMessage(room, { system: true, text: `${member.name}님이 기록실에 들어왔습니다.` });
@@ -247,6 +294,29 @@ const server = http.createServer(async (req, res) => {
           room.game.locationLabel = locations[data.location].label;
           room.game.notice = `${member.name}님이 ${locations[data.location].label}으로 이동했습니다.`;
           addMessage(room, { system: true, text: room.game.notice });
+          return json(res, 200, publicRoom(room));
+        }
+        if (data.action === "interact") {
+          const allowed = {
+            infirmary: ["recover"],
+            classroom: ["study"],
+            library: ["investigate", "study"],
+            tower: ["investigate", "study"],
+            greenhouse: ["gather"],
+            potions: ["brew"],
+            village: ["shop"],
+            lake: ["investigate"],
+            lobby: ["investigate"],
+            banquet: ["investigate"],
+            dueling: ["investigate"],
+            grounds: ["investigate"]
+          };
+          if (!allowed[room.game.location]?.includes(data.interaction)) {
+            return json(res, 400, { error: "현재 장소에서는 할 수 없는 행동입니다." });
+          }
+          const message = interactAtLocation(room, member, data.interaction);
+          if (message.endsWith("필요합니다. 온실에서 먼저 채집해 주세요.")) return json(res, 409, { error: message });
+          addMessage(room, { system: true, text: message });
           return json(res, 200, publicRoom(room));
         }
         if (data.action === "start-combat") {
