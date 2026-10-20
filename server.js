@@ -16,6 +16,21 @@ const starterLessons = [
   { id: "care", label: "신비한 동물 돌보기", icon: "❋", level: 0 }
 ];
 
+const locations = {
+  banquet: { label: "대연회장", description: "새 학기의 소문과 파티가 시작되는 중앙 허브", icon: "♜", type: "hub" },
+  lobby: { label: "현관 로비", description: "약속과 만남이 모이는 넓은 홀", icon: "⌂", type: "social" },
+  classroom: { label: "주문학 교실", description: "기초 주문과 실전 판정을 익히는 교실", icon: "✦", type: "lesson" },
+  library: { label: "도서관", description: "단서와 오래된 기록을 조사하는 곳", icon: "▤", type: "investigation" },
+  grounds: { label: "성 바깥뜰", description: "위험한 조우가 발생하는 탐험 구역", icon: "⚔", type: "combat" },
+  greenhouse: { label: "온실", description: "약초와 마법 식물을 돌보는 온실", icon: "❋", type: "lesson" },
+  potions: { label: "마법약 실험실", description: "재료를 조합해 소모품을 만드는 실험실", icon: "◉", type: "lesson" },
+  tower: { label: "천문탑", description: "밤하늘에서 사건의 징조를 읽는 탑", icon: "✧", type: "investigation" },
+  infirmary: { label: "치유실", description: "부상과 상태 이상을 회복하는 장소", icon: "+", type: "recovery" },
+  dueling: { label: "결투장", description: "안전한 규칙 아래 주문을 겨루는 경기장", icon: "◇", type: "combat" },
+  lake: { label: "검은 호수 선착장", description: "호수와 숲으로 이어지는 외곽 길목", icon: "≈", type: "explore" },
+  village: { label: "마을 거리", description: "상점과 소문을 만날 수 있는 외부 지역", icon: "⌘", type: "social" }
+};
+
 function json(res, status, data) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(data));
@@ -49,10 +64,11 @@ function publicRoom(room) {
     name: room.name,
     term: room.term,
     phase: room.phase,
-    members: room.members.map(({ id, name, role, character, stats, hp, maxHp, xp, level }) => ({ id, name, role, character, stats, hp, maxHp, xp, level })),
+    members: room.members.map(({ id, name, role, character, characterSheet, stats, hp, maxHp, xp, level }) => ({ id, name, role, character, characterSheet, stats, hp, maxHp, xp, level })),
     messages: room.messages,
     lessons: room.lessons,
-    game: room.game
+    game: room.game,
+    locations
   };
 }
 
@@ -134,7 +150,8 @@ const server = http.createServer(async (req, res) => {
           location: "banquet",
           locationLabel: "대연회장",
           combat: null,
-          notice: "새 학기의 첫 저녁입니다. 연회장 곳곳에서 모험의 소문이 들려옵니다."
+          notice: "새 학기의 첫 저녁입니다. 연회장 곳곳에서 모험의 소문이 들려옵니다.",
+          characterDrafts: {}
         },
         clients: new Set()
       };
@@ -166,6 +183,15 @@ const server = http.createServer(async (req, res) => {
           name: String(data.name || "익명의 마법사").slice(0, 24),
           role: "player",
           character: data.character || null,
+          characterSheet: {
+            alias: "",
+            house: "",
+            origin: "",
+            wand: "",
+            temperament: "",
+            fear: "",
+            background: ""
+          },
           stats: { courage: 2, wit: 2, focus: 2 },
           hp: 20,
           maxHp: 20,
@@ -175,6 +201,24 @@ const server = http.createServer(async (req, res) => {
         room.members.push(member);
         addMessage(room, { system: true, text: `${member.name}님이 기록실에 들어왔습니다.` });
         return json(res, 201, member);
+      }
+      if (req.method === "PATCH" && action === "members") {
+        const data = await body(req);
+        const member = room.members.find((item) => item.id === data.memberId);
+        if (!member) return json(res, 404, { error: "캐릭터를 찾을 수 없습니다." });
+        member.name = String(data.name || member.name).slice(0, 24);
+        member.characterSheet = {
+          ...member.characterSheet,
+          alias: String(data.characterSheet?.alias || "").slice(0, 30),
+          house: String(data.characterSheet?.house || "").slice(0, 20),
+          origin: String(data.characterSheet?.origin || "").slice(0, 30),
+          wand: String(data.characterSheet?.wand || "").slice(0, 60),
+          temperament: String(data.characterSheet?.temperament || "").slice(0, 80),
+          fear: String(data.characterSheet?.fear || "").slice(0, 80),
+          background: String(data.characterSheet?.background || "").slice(0, 300)
+        };
+        addMessage(room, { system: true, text: `${member.name}님의 캐릭터 시트가 갱신되었습니다.` });
+        return json(res, 200, member);
       }
       if (req.method === "POST" && action === "messages") {
         const data = await body(req);
@@ -198,17 +242,10 @@ const server = http.createServer(async (req, res) => {
         const member = room.members.find((item) => item.id === data.memberId);
         if (!member) return json(res, 403, { error: "참가자 세션을 확인할 수 없습니다." });
         if (data.action === "location") {
-          const locations = {
-            banquet: "대연회장",
-            lobby: "현관 로비",
-            library: "도서관",
-            classroom: "주문학 교실",
-            grounds: "성 바깥뜰"
-          };
           if (!locations[data.location]) return json(res, 400, { error: "알 수 없는 장소입니다." });
           room.game.location = data.location;
-          room.game.locationLabel = locations[data.location];
-          room.game.notice = `${member.name}님이 ${locations[data.location]}으로 이동했습니다.`;
+          room.game.locationLabel = locations[data.location].label;
+          room.game.notice = `${member.name}님이 ${locations[data.location].label}으로 이동했습니다.`;
           addMessage(room, { system: true, text: room.game.notice });
           return json(res, 200, publicRoom(room));
         }
